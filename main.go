@@ -18,8 +18,9 @@ func main() {
 	r := chi.NewRouter()
 	port := os.Getenv("PORT")
 	r.Use(middleware.Logger)
-	r.Post("/", handlers.NewHandlerFunc(handlers.CreateUserHandler))
-	r.Get("/", handlers.NewHandlerFunc(handlers.GetUserHandler))
+	r.Post("/users", handlers.NewHandlerFunc(handlers.CreateUserHandler))
+	r.Get("/users/{id}", handlers.NewHandlerFunc(handlers.GetUserHandler))
+	r.Get("/users", handlers.NewHandlerFunc(handlers.GetAllUserScoresHandler))
 
 	fmt.Println("Server listening on port", port)
 	http.ListenAndServe(port, r)
