@@ -3,7 +3,7 @@ package handlers
 import (
 	"encoding/json"
 	"net/http"
-	"os"
+	"strconv"
 	"watermelon_king-api/models"
 	"watermelon_king-api/pkg/turso"
 
@@ -25,9 +25,8 @@ func NewHandlerFunc(f models.ApiFunc) http.HandlerFunc {
 	}
 }
 
-func CreateUser(username string, email string, password string) *models.User {
+func CreateUser(username string, email string, password string) map[string]string {
 	db := turso.GetDB()
-
 	user := models.User{
 		Username: username,
 		Email:    email,
@@ -37,7 +36,9 @@ func CreateUser(username string, email string, password string) *models.User {
 
 	db.Create(&user)
 
-	return &user
+	data := SanitizeUserData(&user)
+
+	return data
 }
 
 func CreateUserHandler(w http.ResponseWriter, r *http.Request) error {
@@ -53,12 +54,46 @@ func CreateUserHandler(w http.ResponseWriter, r *http.Request) error {
 
 	CreateUser(user.Username, user.Email, user.Password)
 
-	return WriteJSON(w, http.StatusOK, user)
+	res := SanitizeUserData(&user)
+
+	return WriteJSON(w, http.StatusOK, res)
 }
 
-func UpdateUser(id uuid.UUID) (*models.User, error) {
-	db := turso.GetDB()
+func Login(username string, password string) (map[string]string, error) {
+	var user models.User
 	var err error
+	db := turso.GetDB()
+
+	result := db.First(&user, "username = ?", username)
+
+	if result.Error != nil {
+		err = result.Error
+	}
+
+	data := SanitizeUserData(&user)
+
+	return data, err
+}
+
+type LoginBody struct {
+	Username string
+	Password string
+}
+
+func LoginHandler(w http.ResponseWriter, r *http.Request) error {
+	var login LoginBody
+	err := json.NewDecoder(r.Body).Decode(&login)
+	if err != nil {
+		return WriteJSON(w, http.StatusBadRequest, models.ApiError{Error: err.Error()})
+	}
+
+	return WriteJSON(w, http.StatusOK, login)
+}
+
+func UpdateUserScore(id uuid.UUID, newScore int) (map[string]string, error) {
+	var err error
+
+	db := turso.GetDB()
 
 	user, e := GetUser(id)
 
@@ -66,21 +101,48 @@ func UpdateUser(id uuid.UUID) (*models.User, error) {
 		err = e
 	}
 
-	result := db.Save(&user)
+	var newUser *models.User
+
+	newUser = user
+	newUser.Score = newScore
+
+	result := db.Save(&newUser)
 
 	if result.Error != nil {
 		err = result.Error
 	}
 
-	return user, err
+	user, e = GetUser(id)
+	updatedInfo := SanitizeUserData(user)
+	return updatedInfo, err
 }
 
-func UpdateUserHandler(w http.ResponseWriter, r *http.Request) error {
-	var user models.User
+func SanitizeUserData(user *models.User) map[string]string {
+	data := make(map[string]string)
 
-	UpdateUser(id)
+	data["username"] = user.Username
+	data["email"] = user.Email
+	data["score"] = strconv.Itoa(user.Score)
 
-	return WriteJSON(w, http.StatusOK, user)
+	return data
+}
+
+func UpdateUserScoreHandler(w http.ResponseWriter, r *http.Request) error {
+	var UpdateScoreData models.UpdateUserStruct
+	err := json.NewDecoder(r.Body).Decode(&UpdateScoreData)
+	if err != nil {
+		return WriteJSON(w, http.StatusBadRequest, models.ApiError{Error: err.Error()})
+	}
+
+	_, e := GetUser(UpdateScoreData.ID)
+
+	if e != nil {
+		return WriteJSON(w, http.StatusBadRequest, models.ApiError{Error: e.Error()})
+	}
+
+	res, err := UpdateUserScore(UpdateScoreData.ID, UpdateScoreData.Score)
+
+	return WriteJSON(w, http.StatusOK, res)
 }
 
 func GetUser(id uuid.UUID) (*models.User, error) {
@@ -100,6 +162,7 @@ func GetUser(id uuid.UUID) (*models.User, error) {
 
 func GetUserHandler(w http.ResponseWriter, r *http.Request) error {
 	idParam := chi.URLParam(r, "id")
+	// cleanUser := make(map[string]string)
 
 	id, e := uuid.Parse(idParam)
 	if e != nil {
@@ -110,7 +173,8 @@ func GetUserHandler(w http.ResponseWriter, r *http.Request) error {
 		return err
 	}
 
-	return WriteJSON(w, http.StatusOK, user)
+	cleanData := SanitizeUserData(user)
+	return WriteJSON(w, http.StatusOK, cleanData)
 }
 
 func GetAllUserScores() (map[string]int, error) {
